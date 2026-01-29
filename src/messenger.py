@@ -1,130 +1,60 @@
-import json
-from uuid import uuid4
+"""Messenger utility for A2A communication with purple agents."""
 
 import httpx
-from a2a.client import (
-    A2ACardResolver,
-    ClientConfig,
-    ClientFactory,
-    Consumer,
-)
-from a2a.types import (
-    Message,
-    Part,
-    Role,
-    TextPart,
-    DataPart,
-)
-
-
-DEFAULT_TIMEOUT = 300
-
-
-def create_message(
-    *, role: Role = Role.user, text: str, context_id: str | None = None
-) -> Message:
-    return Message(
-        kind="message",
-        role=role,
-        parts=[Part(TextPart(kind="text", text=text))],
-        message_id=uuid4().hex,
-        context_id=context_id,
-    )
-
-
-def merge_parts(parts: list[Part]) -> str:
-    chunks = []
-    for part in parts:
-        if isinstance(part.root, TextPart):
-            chunks.append(part.root.text)
-        elif isinstance(part.root, DataPart):
-            chunks.append(json.dumps(part.root.data, indent=2))
-    return "\n".join(chunks)
-
-
-async def send_message(
-    message: str,
-    base_url: str,
-    context_id: str | None = None,
-    streaming: bool = False,
-    timeout: int = DEFAULT_TIMEOUT,
-    consumer: Consumer | None = None,
-):
-    """Returns dict with context_id, response and status (if exists)"""
-    async with httpx.AsyncClient(timeout=timeout) as httpx_client:
-        resolver = A2ACardResolver(httpx_client=httpx_client, base_url=base_url)
-        agent_card = await resolver.get_agent_card()
-        config = ClientConfig(
-            httpx_client=httpx_client,
-            streaming=streaming,
-        )
-        factory = ClientFactory(config)
-        client = factory.create(agent_card)
-        if consumer:
-            await client.add_event_consumer(consumer)
-
-        outbound_msg = create_message(text=message, context_id=context_id)
-        last_event = None
-        outputs = {"response": "", "context_id": None}
-
-        # if streaming == False, only one event is generated
-        async for event in client.send_message(outbound_msg):
-            last_event = event
-
-        match last_event:
-            case Message() as msg:
-                outputs["context_id"] = msg.context_id
-                outputs["response"] += merge_parts(msg.parts)
-
-            case (task, update):
-                outputs["context_id"] = task.context_id
-                outputs["status"] = task.status.state.value
-                msg = task.status.message
-                if msg:
-                    outputs["response"] += merge_parts(msg.parts)
-                if task.artifacts:
-                    for artifact in task.artifacts:
-                        outputs["response"] += merge_parts(artifact.parts)
-
-            case _:
-                pass
-
-        return outputs
+from a2a.utils import new_task, new_agent_text_message
 
 
 class Messenger:
+    """A2A client for communicating with purple agents."""
+
     def __init__(self):
-        self._context_ids = {}
+        self.client = httpx.AsyncClient(timeout=300.0)
+        self.active_tasks: dict[str, str] = {}
 
-    async def talk_to_agent(
-        self,
-        message: str,
-        url: str,
-        new_conversation: bool = False,
-        timeout: int = DEFAULT_TIMEOUT,
-    ):
-        """
-        Communicate with another agent by sending a message and receiving their response.
+    async def talk_to_agent(self, prompt: str, agent_url: str) -> str:
+        """Send a message to an agent and get the response text (file path)."""
+        message = new_agent_text_message(prompt)
+        task = new_task(message)
 
-        Args:
-            message: The message to send to the agent
-            url: The agent's URL endpoint
-            new_conversation: If True, start fresh conversation; if False, continue existing conversation
-            timeout: Timeout in seconds for the request (default: 300)
+        # Wrap in JSON-RPC 2.0
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "message/send",
+            "params": {
+                "message": message.model_dump(mode="json"),
+            },
+            "id": "1",
+        }
 
-        Returns:
-            str: The agent's response message
-        """
-        outputs = await send_message(
-            message=message,
-            base_url=url,
-            context_id=None if new_conversation else self._context_ids.get(url, None),
-            timeout=timeout,
+        response = await self.client.post(
+            f"{agent_url.rstrip('/')}/",
+            json=payload,
         )
-        if outputs.get("status", "completed") != "completed":
-            raise RuntimeError(f"{url} responded with: {outputs}")
-        self._context_ids[url] = outputs.get("context_id", None)
-        return outputs["response"]
+        response.raise_for_status()
+
+        # Extract text from response (could be code or file path)
+        response_data = response.json()
+        result = response_data.get("result")
+        if not result:
+            return ""
+
+        # Result can be a Message or a Task according to A2A spec
+        # Handle Task (standard for many A2A scenarios)
+        if "status" in result and result["status"].get("message"):
+            result = result["status"]["message"]
+
+        # Handle Message (or Task's status message)
+        if "parts" in result:
+            for part in result["parts"]:
+                if "text" in part:
+                    return part["text"]
+
+        return ""
+
+    async def close(self):
+        """Close the HTTP client."""
+        await self.client.aclose()
 
     def reset(self):
-        self._context_ids = {}
+        """Reset messenger state."""
+        self.active_tasks.clear()

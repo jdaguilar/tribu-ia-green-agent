@@ -1,75 +1,94 @@
-from typing import Any
-from pydantic import BaseModel, HttpUrl, ValidationError
+"""Green agent for code agent benchmark evaluation."""
+
+import logging
+from typing import List
+from pathlib import Path
+
+
 from a2a.server.tasks import TaskUpdater
-from a2a.types import Message, TaskState, Part, TextPart, DataPart
+from a2a.types import Message, TaskState
 from a2a.utils import get_message_text, new_agent_text_message
 
+from models import EvalRequest
 from messenger import Messenger
+from utils.task_loader import TaskLoader
+from utils.bigcodebench_loader import BigCodeBenchLoader
+from evaluators.code_gen_evaluator import CodeGenerationEvaluator
+from components.orchestrator import BenchmarkOrchestrator
 
 
-class EvalRequest(BaseModel):
-    """Request format sent by the AgentBeats platform to green agents."""
-    participants: dict[str, HttpUrl] # role -> agent URL
-    config: dict[str, Any]
+logger = logging.getLogger("code_benchmark_evaluator")
 
 
 class Agent:
-    # Fill in: list of required participant roles, e.g. ["pro_debater", "con_debater"]
-    required_roles: list[str] = []
-    # Fill in: list of required config keys, e.g. ["topic", "num_rounds"]
-    required_config_keys: list[str] = []
+    """Green agent that orchestrates code generation benchmark."""
 
-    def __init__(self):
+    required_roles: List[str] = ["code_agent"]
+
+    def __init__(self, model: str = None):
+        self.model = model
         self.messenger = Messenger()
-        # Initialize other state here
+
+        # Loaders
+        script_dir = Path(__file__).parent
+        tasks_dir = script_dir.parent / "tasks"
+        self.task_loader = TaskLoader(str(tasks_dir))
+        self.bigcodebench_loader = BigCodeBenchLoader()
+
+        # Evaluators
+        self.evaluators = {"code_generation": CodeGenerationEvaluator()}
+
+        # Orchestrator
+        self.orchestrator = BenchmarkOrchestrator(
+            evaluator_map=self.evaluators,
+            messenger=self.messenger,
+            task_loader=self.task_loader,
+            bigcodebench_loader=self.bigcodebench_loader,
+        )
+
+        if self.model:
+            logger.info(f"Initialized evaluator with model: {self.model}")
 
     def validate_request(self, request: EvalRequest) -> tuple[bool, str]:
+        """Validate the evaluation request."""
         missing_roles = set(self.required_roles) - set(request.participants.keys())
         if missing_roles:
             return False, f"Missing roles: {missing_roles}"
 
-        missing_config_keys = set(self.required_config_keys) - set(request.config.keys())
-        if missing_config_keys:
-            return False, f"Missing config keys: {missing_config_keys}"
-
-        # Add additional request validation here
+        category = request.config.get("category", "code_generation")
+        if category not in self.evaluators:
+            return False, f"Unsupported category: {category}"
 
         return True, "ok"
 
     async def run(self, message: Message, updater: TaskUpdater) -> None:
-        """Implement your agent logic here.
-
-        Args:
-            message: The incoming message
-            updater: Report progress (update_status) and results (add_artifact)
-
-        Use self.messenger.talk_to_agent(message, url) to call other agents.
-        """
+        """Main execution loop for benchmark evaluation."""
         input_text = get_message_text(message)
 
         try:
-            request: EvalRequest = EvalRequest.model_validate_json(input_text)
-            ok, msg = self.validate_request(request)
+            request = EvalRequest.model_validate_json(input_text)
+            ok, validation_msg = self.validate_request(request)
             if not ok:
-                await updater.reject(new_agent_text_message(msg))
+                await updater.reject(new_agent_text_message(validation_msg))
                 return
-        except ValidationError as e:
+        except Exception as e:
             await updater.reject(new_agent_text_message(f"Invalid request: {e}"))
             return
 
-        # Replace example code below with your agent logic
-        # Use request.participants to get participant agent URLs by role
-        # Use request.config for assessment parameters
-
         await updater.update_status(
-            TaskState.working, new_agent_text_message("Thinking...")
+            TaskState.working,
+            new_agent_text_message(
+                f"Starting code agent benchmark.\n{request.model_dump_json()}"
+            ),
         )
-        await updater.add_artifact(
-            parts=[
-                Part(root=TextPart(text="The agent performed well.")),
-                Part(root=DataPart(data={
-                    # structured assessment results
-                }))
-            ],
-            name="Result",
-        )
+
+        try:
+            participants = {
+                role: str(url) for role, url in request.participants.items()
+            }
+            await self.orchestrator.run_benchmark(request.config, participants, updater)
+        except Exception as e:
+            logger.error(f"Benchmark failed: {e}")
+            await updater.failed(new_agent_text_message(f"Benchmark failed: {e}"))
+        finally:
+            self.messenger.reset()
