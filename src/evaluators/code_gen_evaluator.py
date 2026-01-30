@@ -71,7 +71,9 @@ class CodeGenerationEvaluator(BaseEvaluator):
 
         # Run tests
         logger.info(f"Running tests for task {task['id']}")
-        test_results = self.test_runner.run_tests(submission, test_code)
+        test_results = self.test_runner.run_tests(
+            submission, test_code, entry_point=task.get("entry_point", "task_func")
+        )
 
         # Save test output
         try:

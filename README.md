@@ -51,17 +51,34 @@ docker build -t my-agent .
 docker run -p 9009:9009 my-agent
 ```
 
+## Benchmarks
+
+This green agent comes pre-configured with the **BigCodeBench** evaluation suite, focusing on high-quality Python coding tasks that require only the standard library.
+
+### Running BigCodeBench Evaluation
+
+1. **Configure the scenario** - Edit [`scenario_bigcodebench.toml`](scenario_bigcodebench.toml) with your agent's details.
+2. **Run the evaluation**:
+   ```bash
+   # Use the AgentBeats assessment runner (if installed)
+   agentbeats-run scenario_bigcodebench.toml
+   ```
+   Or run the server and send a request manually (see below).
+
+For more details on the BigCodeBench integration, see [BIGCODEBENCH.md](BIGCODEBENCH.md).
+
 ## Testing
 
 Run A2A conformance tests against your agent.
 
 ```bash
 # Install test dependencies
-uv sync --extra test
+uv sync --all-extras
 
-# Start your agent (uv or docker; see above)
+# Start your agent
+uv run src/server.py
 
-# Run tests against your running agent URL
+# Run tests
 uv run pytest --agent-url http://localhost:9009
 ```
 

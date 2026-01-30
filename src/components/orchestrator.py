@@ -125,7 +125,10 @@ Description: {task["description"]}
 
 {prompt}
 
-Important: Return ONLY the complete Python code, including imports if needed. Do not include explanations or markdown formatting."""
+Important: 
+1. Return ONLY the complete Python code, including imports if needed. 
+2. Do not include explanations or markdown formatting.
+3. Your main function MUST be named '{task['entry_point']}' or 'task_func'."""
 
             try:
                 submission = await self.messenger.talk_to_agent(

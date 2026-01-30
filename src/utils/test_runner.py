@@ -12,13 +12,14 @@ class TestRunner:
     def __init__(self):
         self.timeout = 60
 
-    def run_tests(self, code: str, test_code: str) -> Dict[str, Any]:
+    def run_tests(self, code: str, test_code: str, entry_point: str = "task_func") -> Dict[str, Any]:
         """
         Run tests against provided code.
 
         Args:
             code: The Python code to test
             test_code: The test code (pytest format)
+            entry_point: The main function name to alias to 'task_func' if needed
 
         Returns:
             Dictionary with test results including:
@@ -37,9 +38,22 @@ class TestRunner:
 
             # Write test to file
             test_file = tmpdir_path / "test_solution.py"
+            
+            # Aliasing logic to ensure both entry_point and task_func are available
+            aliasing = f"""
+try:
+    from solution import *
+except ImportError:
+    pass
+
+if '{entry_point}' in globals() and 'task_func' not in globals():
+    task_func = {entry_point}
+if 'task_func' in globals() and '{entry_point}' not in globals():
+    {entry_point} = task_func
+"""
             test_content = f"""import sys
 sys.path.insert(0, '{tmpdir}')
-from solution import *
+{aliasing}
 
 {test_code}
 """
