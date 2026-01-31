@@ -20,6 +20,7 @@ class TaskResult(BaseModel):
     passed: bool
     generated_code: Optional[str] = None
     details: Dict[str, Any]
+    agent_execution_time_seconds: Optional[float] = None
 
 
 class BenchmarkResult(BaseModel):

@@ -131,7 +131,7 @@ Important:
 3. Your main function MUST be named '{task['entry_point']}' or 'task_func'."""
 
             try:
-                submission = await self.messenger.talk_to_agent(
+                submission, agent_time = await self.messenger.talk_to_agent(
                     task_description, agent_url
                 )
                 submission = self._clean_code_submission(submission)
@@ -153,6 +153,7 @@ Important:
                     passed=eval_result["passed"],
                     generated_code=submission,
                     details=eval_result["details"],
+                    agent_execution_time_seconds=agent_time,
                 )
                 task_results.append(task_result)
 
