@@ -19,12 +19,21 @@ Results:
 - Passed: {benchmark_result.tasks_passed}
 - Failed: {benchmark_result.tasks_failed}
 - Average Score: {benchmark_result.average_score:.2%}
-
-Task Breakdown:
 """
+        
+        # Add execution time statistics if available
+        if benchmark_result.total_execution_time_seconds is not None:
+            summary += f"- Total Execution Time: {benchmark_result.total_execution_time_seconds:.2f}s\n"
+        if benchmark_result.average_execution_time_seconds is not None:
+            summary += f"- Average Execution Time per Task: {benchmark_result.average_execution_time_seconds:.2f}s\n"
+        
+        summary += "\nTask Breakdown:\n"
         for result in benchmark_result.task_results:
             status = "✓" if result.passed else "✗"
-            summary += f"\n{status} {result.task_title}: {result.score:.2%}"
+            time_str = ""
+            if result.agent_execution_time_seconds is not None:
+                time_str = f" ({result.agent_execution_time_seconds:.2f}s)"
+            summary += f"\n{status} {result.task_title}: {result.score:.2%}{time_str}"
 
         return summary
 

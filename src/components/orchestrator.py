@@ -176,12 +176,25 @@ Important:
             else 0.0
         )
 
+        # Compute execution time statistics
+        execution_times = [
+            r.agent_execution_time_seconds
+            for r in task_results
+            if r.agent_execution_time_seconds is not None
+        ]
+        total_execution_time = sum(execution_times) if execution_times else None
+        average_execution_time = (
+            total_execution_time / len(execution_times) if execution_times else None
+        )
+
         benchmark_result = BenchmarkResult(
             total_tasks=len(task_results),
             tasks_passed=tasks_passed,
             tasks_failed=len(task_results) - tasks_passed,
             average_score=average_score,
             task_results=task_results,
+            total_execution_time_seconds=total_execution_time,
+            average_execution_time_seconds=average_execution_time,
         )
 
         summary = self.reporter.generate_summary(benchmark_result)

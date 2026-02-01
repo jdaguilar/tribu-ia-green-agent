@@ -31,3 +31,5 @@ class BenchmarkResult(BaseModel):
     tasks_failed: int
     average_score: float
     task_results: List[TaskResult]
+    total_execution_time_seconds: Optional[float] = None
+    average_execution_time_seconds: Optional[float] = None
